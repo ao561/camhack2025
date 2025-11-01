@@ -17,7 +17,7 @@ static const int MIN_WINDOW_SIZE = 20;
 static const int MAX_DEPTH = 8;
 static const CGFloat JITTER_POS = 0.05;
 static const CGFloat MARGIN = 80.0;
-static const double FRAME_DURATION = 1.0; // seconds per frame
+static const double FRAME_DURATION = 0.1; // seconds per frame (matches GIF timing)
 
 // -------- Helper Functions --------
 struct RGB {
@@ -382,16 +382,46 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
 // -------- Main --------
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (argc < 2) {
-            fprintf(stderr, "Usage: %s <frame1.jpg> <frame2.jpg> ...\n", argv[0]);
-            fprintf(stderr, "Provide multiple image files to play as video frames\n");
-            return 1;
-        }
-        
         NSMutableArray<NSString*> *framePaths = [NSMutableArray array];
-        for (int i = 1; i < argc; ++i) {
-            NSString *path = [NSString stringWithUTF8String:argv[i]];
-            [framePaths addObject:path];
+        
+        if (argc < 2) {
+            // Default: load frames from images/ folder
+            NSLog(@"No arguments provided, loading frames from images/ folder...");
+            NSString *imagesDir = @"images";
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSError *error = nil;
+            NSArray<NSString*> *files = [fm contentsOfDirectoryAtPath:imagesDir error:&error];
+            
+            if (error || !files) {
+                fprintf(stderr, "Error: Could not read images/ folder\n");
+                fprintf(stderr, "Usage: %s <frame1.jpg> <frame2.jpg> ...\n", argv[0]);
+                return 1;
+            }
+            
+            // Filter and sort frame files
+            NSMutableArray<NSString*> *frameFiles = [NSMutableArray array];
+            for (NSString *file in files) {
+                if ([file hasPrefix:@"frame_"] && 
+                    ([file hasSuffix:@".png"] || [file hasSuffix:@".jpg"] || [file hasSuffix:@".jpeg"])) {
+                    [frameFiles addObject:[imagesDir stringByAppendingPathComponent:file]];
+                }
+            }
+            
+            // Sort alphabetically (frame_02, frame_03, etc.)
+            [frameFiles sortUsingSelector:@selector(compare:)];
+            
+            if (frameFiles.count == 0) {
+                fprintf(stderr, "Error: No frame images found in images/ folder\n");
+                return 1;
+            }
+            
+            framePaths = frameFiles;
+        } else {
+            // Use command-line arguments
+            for (int i = 1; i < argc; ++i) {
+                NSString *path = [NSString stringWithUTF8String:argv[i]];
+                [framePaths addObject:path];
+            }
         }
         
         NSLog(@"Loading %lu frames...", (unsigned long)framePaths.count);
