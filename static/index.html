@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quadtree Display Input Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 Quadtree Display Input Manager</h1>
+            <p>Upload images/videos or capture screen/webcam to display as animated windows</p>
+        </header>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="label">Frames:</span>
+                <span id="frame-count" class="value">0</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Display:</span>
+                <span id="display-status" class="value inactive">Inactive</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Capture:</span>
+                <span id="capture-status" class="value inactive">Inactive</span>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="image">📷 Image</button>
+            <button class="tab-button" data-tab="video">🎬 Video</button>
+            <button class="tab-button" data-tab="screen">🖥️ Screen Capture</button>
+            <button class="tab-button" data-tab="webcam">📹 Webcam</button>
+        </div>
+
+        <!-- Image Upload Tab -->
+        <div id="image-tab" class="tab-content active">
+            <h2>Upload Image</h2>
+            <p>Upload a single image to display as quadtree windows</p>
+            
+            <div class="upload-area" id="image-drop-zone">
+                <input type="file" id="image-input" accept="image/*" hidden>
+                <label for="image-input" class="upload-label">
+                    <div class="upload-icon">📁</div>
+                    <div>Click to browse or drag & drop image</div>
+                    <div class="upload-hint">PNG, JPG, JPEG supported</div>
+                </label>
+            </div>
+            
+            <div id="image-preview" class="preview-area" style="display:none;">
+                <img id="image-preview-img" alt="Preview">
+            </div>
+        </div>
+
+        <!-- Video Upload Tab -->
+        <div id="video-tab" class="tab-content">
+            <h2>Upload Video</h2>
+            <p>Upload a video file to extract frames</p>
+            
+            <div class="upload-area" id="video-drop-zone">
+                <input type="file" id="video-input" accept="video/*" hidden>
+                <label for="video-input" class="upload-label">
+                    <div class="upload-icon">🎥</div>
+                    <div>Click to browse or drag & drop video</div>
+                    <div class="upload-hint">MP4, AVI, MOV, WEBM supported</div>
+                </label>
+            </div>
+            
+            <div class="settings">
+                <div class="setting-group">
+                    <label for="video-fps">Frames per second:</label>
+                    <input type="number" id="video-fps" value="10" min="1" max="60">
+                </div>
+                <div class="setting-group">
+                    <label for="video-max-frames">Max frames (optional):</label>
+                    <input type="number" id="video-max-frames" placeholder="No limit" min="1">
+                </div>
+            </div>
+            
+            <div id="video-preview" class="preview-area" style="display:none;">
+                <video id="video-preview-player" controls></video>
+            </div>
+        </div>
+
+        <!-- Screen Capture Tab -->
+        <div id="screen-tab" class="tab-content">
+            <h2>Screen Capture</h2>
+            <p>Capture your screen in real-time</p>
+            
+            <div class="settings">
+                <div class="setting-group">
+                    <label for="screen-fps">Capture FPS:</label>
+                    <input type="number" id="screen-fps" value="10" min="1" max="30">
+                </div>
+                <div class="setting-group">
+                    <label for="screen-duration">Duration (seconds, optional):</label>
+                    <input type="number" id="screen-duration" placeholder="Continuous" min="1">
+                </div>
+            </div>
+            
+            <div class="capture-controls">
+                <button id="screen-start-btn" class="btn btn-primary">▶️ Start Capture</button>
+                <button id="screen-stop-btn" class="btn btn-danger" disabled>⏹️ Stop Capture</button>
+            </div>
+            
+            <div class="info-box">
+                <strong>Note:</strong> Screen capture will continuously save frames to disk. 
+                Stop capture before starting display.
+            </div>
+        </div>
+
+        <!-- Webcam Capture Tab -->
+        <div id="webcam-tab" class="tab-content">
+            <h2>Webcam Capture</h2>
+            <p>Capture from your webcam in real-time</p>
+            
+            <div class="settings">
+                <div class="setting-group">
+                    <label for="webcam-fps">Capture FPS:</label>
+                    <input type="number" id="webcam-fps" value="10" min="1" max="30">
+                </div>
+                <div class="setting-group">
+                    <label for="webcam-duration">Duration (seconds, optional):</label>
+                    <input type="number" id="webcam-duration" placeholder="Continuous" min="1">
+                </div>
+            </div>
+            
+            <div class="capture-controls">
+                <button id="webcam-start-btn" class="btn btn-primary">▶️ Start Capture</button>
+                <button id="webcam-stop-btn" class="btn btn-danger" disabled>⏹️ Stop Capture</button>
+            </div>
+            
+            <div class="info-box">
+                <strong>Note:</strong> Webcam capture will continuously save frames to disk. 
+                Stop capture before starting display.
+            </div>
+        </div>
+
+        <!-- Display Controls -->
+        <div class="display-controls">
+            <h3>Display Controls</h3>
+            <div class="button-group">
+                <button id="display-start-btn" class="btn btn-success" disabled>🎨 Start Quadtree Display</button>
+                <button id="display-stop-btn" class="btn btn-danger" disabled>⏹️ Stop Display</button>
+                <button id="clear-btn" class="btn btn-secondary">🗑️ Clear Frames</button>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="messages" class="messages"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
