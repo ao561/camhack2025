@@ -252,7 +252,8 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
     // Create windows and store their regions
     for (QuadNode *node : leaves) {
         CGFloat screenX = _areaX0 + node->x * _scaleX;
-        CGFloat screenY = _areaY0 + node->y * _scaleY;
+        // Flip Y coordinate: subtract from bottom to invert the image
+        CGFloat screenY = _areaY0 + (imgH - node->y - node->h) * _scaleY;
         CGFloat screenWNode = node->w * _scaleX;
         CGFloat screenHNode = node->h * _scaleY;
         
