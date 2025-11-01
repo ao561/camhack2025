@@ -175,7 +175,7 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
 @property (nonatomic) std::mt19937 rng;
 @property (nonatomic) std::uniform_real_distribution<double> uni;
 @property (nonatomic) CGFloat areaX0, areaY0, scaleX, scaleY;
-@property (nonatomic) std::vector<std::pair<int, int>> windowRegions; // (x, y, w, h) for each window
+@property (nonatomic) std::vector<std::tuple<int, int, int, int>> windowRegions; // (x, y, w, h) for each window
 - (instancetype)initWithFramePaths:(NSArray<NSString*> *)paths;
 - (void)updateFrame;
 @end
@@ -291,7 +291,7 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
         [_windows addObject:win];
         
         // Store region info for updates
-        _windowRegions.push_back({node->x, node->y, node->w, node->h});
+        _windowRegions.push_back(std::make_tuple(node->x, node->y, node->w, node->h));
     }
     
     NSLog(@"Created %lu windows for %lu frames", (unsigned long)_windows.count, (unsigned long)_framePaths.count);
@@ -337,8 +337,11 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
     // Update each window's color based on its region in the new frame
     for (NSUInteger i = 0; i < _windows.count; ++i) {
         auto region = _windowRegions[i];
-        RGB color = calculateAvgColor(bitmap, region.first, region.second, 
-                                     _windowRegions[i].first, _windowRegions[i].second);
+        int x = std::get<0>(region);
+        int y = std::get<1>(region);
+        int w = std::get<2>(region);
+        int h = std::get<3>(region);
+        RGB color = calculateAvgColor(bitmap, x, y, w, h);
         
         CGFloat r = color.r / 255.0;
         CGFloat g = color.g / 255.0;
