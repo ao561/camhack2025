@@ -32,7 +32,7 @@ def create_window(
 
     window.geometry(f"{WINDOW_SIZE}x{WINDOW_SIZE}+{x_offset}+{y_offset}")
     window.configure(bg=color)
-    window.overrideredirect(True)
+    window.overrideredirect(False)
     window.resizable(False, False)
 
     # Ensure black windows use white text if titles are shown, though canvas is empty.
