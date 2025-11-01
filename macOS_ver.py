@@ -37,20 +37,20 @@ from PIL import Image, ImageStat
 # ──────────────────────────────────────────────────────────────────────────────
 TITLE_TEXT = "Quadtree Display"   # Window title
 MARGIN = 0                       # Padding around the drawn image, in pixels
-VARIANCE_THRESHOLD = 15           # Split a node only if avg channel stddev > this
-MIN_WINDOW_SIZE = 15              # Stop splitting if either side < 2*MIN_WINDOW_SIZE
+VARIANCE_THRESHOLD = 10           # Split a node only if avg channel stddev > this
+MIN_WINDOW_SIZE = 8              # Stop splitting if either side < 2*MIN_WINDOW_SIZE
 MAX_DEPTH = 8                     # Quadtree max depth
 JITTER_POS = 0.00                 # Positional jitter fraction (0.1 = ±10% of rect size)
 WINDOW_SCALE = 1.00                # Scale the image when drawing (0.5 = half size)
 AUTO_CLOSE_SECONDS = 0            # Auto close after N seconds (0 = never)
 RECTS_PER_FRAME = 60              # How many rects to add each animation frame
 USE_FADE = True                   # Fade batches in?
-FADE_DURATION = 0.15              # Seconds to fade a batch
-DRAW_BORDERS = False              # Draw a 1px border around rectangles?
+FADE_DURATION = 2.00              # Seconds to fade a batch
+DRAW_BORDERS = True              # Draw a 1px border around rectangles?
 
 # How to pick background color:
-BG_MODE = "mean"                  # "palette" or "mean"
-PALETTE_COLORS = 10               # If BG_MODE=="palette": how many colors to quantize to
+BG_MODE = "palette"                  # "palette" or "mean"
+PALETTE_COLORS = 2               # If BG_MODE=="palette": how many colors to quantize to
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -177,6 +177,12 @@ def run(
     img = Image.open(image_path).convert("RGB")
     img_w, img_h = img.size
 
+    # If using palette mode, quantize the entire image upfront
+    if bg_mode == "palette":
+        img.thumbnail((1024, 1024), Image.LANCZOS)  # Work with a reasonable size
+        img = img.convert("P", palette=Image.ADAPTIVE, colors=palette_colors)
+        img = img.convert("RGB")  # Convert back to RGB but now with only palette_colors
+
     # 1) Choose background color once, then start by drawing only that.
     bg = dominant_color(img, mode=bg_mode, colors=palette_colors)
     print(f"Background (dominant): {bg}  mode={bg_mode}")
@@ -203,10 +209,10 @@ def run(
         sh = max(1, int(node.h * window_scale))
         area = sw * sh
         score = area * rgb_dist2(node.color, bg)
-        # jitter center for that "window storm" feel
+        # Position rectangles exactly at their intended location
         sx = int(MARGIN + node.x * window_scale)
         sy = int(MARGIN + node.y * window_scale)
-        rect = pygame.Rect(sx-1, sy-1, sw+2, sh+2)
+        rect = pygame.Rect(sx, sy, sw, sh)
         candidates.append((rect, node.color, area, score))
 
     # Keep best K by score, then render big → small
@@ -223,6 +229,14 @@ def run(
 
     # Reusable alpha layer (avoid realloc per batch)
     alpha_layer = pygame.Surface(window.get_size(), pygame.SRCALPHA)
+
+    # Draw a rectangle with visible borders
+    def draw_rect_with_border(surface, color, rect, has_border):
+        pygame.draw.rect(surface, color, rect)
+        if has_border:
+            # Use bright red borders for high visibility
+            border_color = (255, 0, 0)  # Bright red
+            pygame.draw.rect(surface, border_color, rect, 1)
 
     # --- Main loop ---
     running = True
@@ -256,6 +270,7 @@ def run(
             e = revealed
             if fade:
                 batch_times.append((time.time(), s, e))
+            print(f"Boxes drawn: {revealed}/{len(candidates)}")
 
         # Background first: draw one full rectangle of bg color
         window.fill((0, 0, 0))  # outer margin
@@ -267,15 +282,11 @@ def run(
             fully_opaque_upto = min((bt[1] for bt in batch_times), default=revealed)
             for i in range(fully_opaque_upto):
                 rect, color, _, _ = candidates[i]
-                pygame.draw.rect(window, color, rect)
-                if borders:
-                    pygame.draw.rect(window, (0, 0, 0), rect, 1)
+                draw_rect_with_border(window, color, rect, borders)
         else:
             for i in range(revealed):
                 rect, color, _, _ = candidates[i]
-                pygame.draw.rect(window, color, rect)
-                if borders:
-                    pygame.draw.rect(window, (0, 0, 0), rect, 1)
+                draw_rect_with_border(window, color, rect, borders)
 
         # Fade currently revealing batches on top (single reused layer)
         if fade and batch_times:
@@ -288,17 +299,17 @@ def run(
                     finished.append((t0, s, e))
                     for i in range(s, e):
                         rect, color, _, _ = candidates[i]
-                        pygame.draw.rect(window, color, rect)
-                        if borders:
-                            pygame.draw.rect(window, (0, 0, 0), rect, 1)
+                        draw_rect_with_border(window, color, rect, borders)
                 else:
                     a255 = int(a * 255)
                     for i in range(s, e):
                         rect, color, _, _ = candidates[i]
                         r, g, b = color
-                        pygame.draw.rect(alpha_layer, (r, g, b, a255), rect)
+                        color_with_alpha = (r, g, b, a255)
+                        pygame.draw.rect(alpha_layer, color_with_alpha, rect)
                         if borders:
-                            pygame.draw.rect(alpha_layer, (0, 0, 0, a255), rect, 1)
+                            border_color = (255, 0, 0, a255)  # Red with current alpha
+                            pygame.draw.rect(alpha_layer, border_color, rect, 1)
             # composite once per frame
             window.blit(alpha_layer, (0, 0))
             # drop finished batches
