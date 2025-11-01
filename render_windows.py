@@ -5,12 +5,12 @@ from typing import Callable
 
 
 TOTAL_WINDOWS = 100
-WINDOW_SIZE = 140  # pixels
-WINDOW_PADDING = 20  # pixels
+WINDOW_SIZE = 30  # pixels
+WINDOW_PADDING = 5  # pixels
 MAX_COLUMNS = 10
 VISIBLE_DURATION_MS = 2000  # how long each batch stays visible
 PAUSE_DURATION_MS = 2000  # pause between batches
-TOTAL_RUNTIME_SECONDS = 40
+TOTAL_RUNTIME_SECONDS = 10
 COLORS = (["white"] * (TOTAL_WINDOWS // 2)) + (["black"] * (TOTAL_WINDOWS // 2))
 
 
