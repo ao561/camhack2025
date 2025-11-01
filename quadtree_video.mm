@@ -12,9 +12,9 @@
 #include <string>
 
 // -------- SETTINGS --------
-static const int VARIANCE_THRESHOLD = 20;
-static const int MIN_WINDOW_SIZE = 20;
-static const int MAX_DEPTH = 8;
+static const int VARIANCE_THRESHOLD = 15;
+static const int MIN_WINDOW_SIZE = 10;
+static const int MAX_DEPTH = 20;
 static const CGFloat JITTER_POS = 0.05;
 static const CGFloat MARGIN = 80.0;
 static const double FRAME_DURATION = 0.1; // seconds per frame (matches GIF timing)
@@ -220,6 +220,15 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
     
     std::vector<QuadNode*> leaves;
     root->getLeafNodes(leaves);
+    
+    // Sort leaves from bottom-right to top-left
+    std::sort(leaves.begin(), leaves.end(), [](QuadNode* a, QuadNode* b) {
+        // Primary sort by y (bottom to top)
+        if (a->y != b->y) return a->y > b->y;
+        // Secondary sort by x (right to left)
+        return a->x > b->x;
+    });
+    
     NSLog(@"Leaf count: %lu", leaves.size());
     
     // Screen setup
