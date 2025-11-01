@@ -18,8 +18,6 @@ import skimage.color as color
 import pygame
 import random
 
-from scipy.ndimage import uniform_filter
-
 DOWNSCALE = 0.125
 # number of shapes
 ROUNDS = 100
@@ -61,7 +59,7 @@ def clamp_rect(x, y, w, h, H, W):
     h = max(0, min(h, W - y))
     return x, y, w, h
 
-def get_blocks(im_down_color, im_down_gray):
+def get_blocks_from_imgs(im_down_color, im_down_gray):
     blocks = []
 
     H, W, _ = im_down_color.shape
@@ -187,7 +185,7 @@ if __name__ == "__main__":
     ws = w / im_w
     hs = h / im_w
 
-    blocks = get_blocks(im_down_color, im_down_gray)
+    blocks = get_blocks_from_imgs(im_down_color, im_down_gray)
 
     pygame.init()
 
@@ -204,7 +202,7 @@ if __name__ == "__main__":
         screen.fill((255,0,0))
         pygame.draw.rect(screen, (0,0,0), (wpad, hpad, w, h))
 
-        blocks = get_blocks(im_down_color, im_down_gray)
+        blocks = get_blocks_from_imgs(im_down_color, im_down_gray)
 
         for (x, y, w, h, c) in blocks:
                 c = c * 255
