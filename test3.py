@@ -5,7 +5,7 @@ import math
 
 # --- SETTINGS ---
 IMAGE_PATH = "obama.jpg"
-MAX_WINDOWS = 1000            # target number of windows
+MAX_WINDOWS = 30            # target number of windows
 TITLE_TEXT = "Program Window"  # title bar text
 MARGIN = 80                    # screen margin for the mosaic area
 OVERLAP_FACTOR = 0.25          # windows are bigger than their cell by this fraction
