@@ -151,8 +151,8 @@ def main():
                     help="Explicit downsample factor (e.g., 0.125). Overrides --quality")
     ap.add_argument("--boxes", type=int, default=0,
                     help="Maximum number of boxes per frame (0 = no limit)")
-    ap.add_argument("--folder", default="frames",
-                    help="Folder containing images (default: frames)")
+    ap.add_argument("--folder", default="images",
+                    help="Folder containing images (default: images)")
     args = ap.parse_args()
 
     ds_factor = pick_downsample(args.quality, args.downsample)

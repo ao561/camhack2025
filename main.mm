@@ -222,9 +222,10 @@ int main(int argc, const char * argv[]) {
                             NSColor *col = (b.count >= 5) ? ColorFromJSONValue(b[4]) : [NSColor blackColor];
                             BlockWindow *win = [[BlockWindow alloc]
                                 initWithContentRect:NSMakeRect(x, y, w, h)
-                                          styleMask:NSWindowStyleMaskBorderless
+                                          styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable)
                                             backing:NSBackingStoreBuffered
                                               defer:NO];
+                            [win setTitle:@"Block Window"];
                             [win setBackgroundColor:col];
                             [win setOpaque:YES];
                             [win setLevel:NSStatusWindowLevel];
@@ -270,9 +271,10 @@ int main(int argc, const char * argv[]) {
                     NSColor *col = (b.count >= 5) ? ColorFromJSONValue(b[4]) : [NSColor blackColor];
                     BlockWindow *win = [[BlockWindow alloc]
                         initWithContentRect:NSMakeRect(x, y, w, h)
-                                  styleMask:NSWindowStyleMaskBorderless
+                                  styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable)
                                     backing:NSBackingStoreBuffered
                                       defer:NO];
+                    [win setTitle:@"Block Window"];
                     [win setBackgroundColor:col];
                     [win setOpaque:YES];
                     [win setLevel:NSStatusWindowLevel];
