@@ -1,15 +1,15 @@
 // main.mm
 // Build: clang++ -std=c++17 main.mm -framework Cocoa -framework Foundation -O2 -o WindowCreator
-// Run:   ./WindowCreator ./get_blocks.py
+// Run:   ./WindowCreator ./get_blocks.py                      (single frame default from script)
+//        ./WindowCreator ./get_blocks.py --mode all           (multiple frames)
+//        ./WindowCreator ./get_blocks.py --mode all --target 1024x768
 
 #import <Cocoa/Cocoa.h>
 #import <Foundation/Foundation.h>
-#import <dispatch/dispatch.h>
 
 @interface BlockWindow : NSWindow @end
 @implementation BlockWindow @end
 
-// Accepts "#AABBCC" or [r,g,b]
 static NSColor* ColorFromJSONValue(id colVal) {
     if ([colVal isKindOfClass:[NSArray class]] && [colVal count] == 3) {
         CGFloat r = [colVal[0] doubleValue] / 255.0;
@@ -29,28 +29,28 @@ static NSColor* ColorFromJSONValue(id colVal) {
     return [NSColor blackColor];
 }
 
-// Resolve absolute path
 static NSString* AbsolutePath(NSString *p) {
     if ([p hasPrefix:@"/"]) return p;
-    NSString *cwd = NSFileManager.defaultManager.currentDirectoryPath;
-    return [cwd stringByAppendingPathComponent:p];
+    return [NSFileManager.defaultManager.currentDirectoryPath stringByAppendingPathComponent:p];
 }
 
-// Run python and capture stdout+stderr; returns nil on failure and sets *errOut
-static NSString* RunPythonScript(NSString *absScriptPath, NSError **errOut) {
+// Run python once and capture stdout+stderr; returns nil on failure and sets *errOut
+static NSString* RunPythonOnce(NSString *absScriptPath,
+                               NSArray<NSString*> *extraArgs,
+                               NSError **errOut) {
     NSTask *task = [[NSTask alloc] init];
-    // Use /usr/bin/env to discover python3 on PATH (respects your .venv)
     task.executableURL = [NSURL fileURLWithPath:@"/usr/bin/env"];
-    task.arguments = @[ @"python3", absScriptPath ];
-
-    // Optional: run with the script's directory as CWD so relative reads in the script work
+    NSMutableArray *args = [NSMutableArray arrayWithObject:@"python3"];
+    [args addObject:absScriptPath];
+    if (extraArgs.count) [args addObjectsFromArray:extraArgs];
+    task.arguments = args;
     task.currentDirectoryURL = [NSURL fileURLWithPath:[absScriptPath stringByDeletingLastPathComponent]];
 
     NSPipe *pipe = [NSPipe pipe];
     task.standardOutput = pipe;
     task.standardError  = pipe;
 
-    __block NSError *launchError = nil;
+    NSError *launchError = nil;
     if (![task launchAndReturnError:&launchError]) {
         if (errOut) *errOut = launchError;
         return nil;
@@ -71,10 +71,54 @@ static NSString* RunPythonScript(NSString *absScriptPath, NSError **errOut) {
     return out ?: @"";
 }
 
+// Robustly slice JSON out of any surrounding logs (multi-line safe)
+static NSString* ExtractJSONNSString(NSString *output) {
+    if (!output) return nil;
+    NSString *trim = [output stringByTrimmingCharactersInSet:
+                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    // Prefer arrays (your script prints arrays), else try object
+    NSRange firstBracket = [trim rangeOfString:@"["];
+    if (firstBracket.location != NSNotFound) {
+        NSRange lastBracket = [trim rangeOfString:@"]" options:NSBackwardsSearch];
+        if (lastBracket.location != NSNotFound && lastBracket.location >= firstBracket.location) {
+            NSRange jsonRange = NSMakeRange(firstBracket.location,
+                                            lastBracket.location - firstBracket.location + 1);
+            return [trim substringWithRange:jsonRange];
+        }
+    }
+    // Fallback: try object
+    NSRange firstBrace = [trim rangeOfString:@"{"];
+    if (firstBrace.location != NSNotFound) {
+        NSRange lastBrace = [trim rangeOfString:@"}" options:NSBackwardsSearch];
+        if (lastBrace.location != NSNotFound && lastBrace.location >= firstBrace.location) {
+            NSRange jsonRange = NSMakeRange(firstBrace.location,
+                                            lastBrace.location - firstBrace.location + 1);
+            return [trim substringWithRange:jsonRange];
+        }
+    }
+    return nil;
+}
+
+// Is this array a single frame (array of blocks)?
+static BOOL LooksLikeBlocksArray(NSArray *arr) {
+    if (![arr isKindOfClass:[NSArray class]]) return NO;
+    if (arr.count == 0) return YES; // empty blocks still a single frame
+    id first = arr[0];
+    if (![first isKindOfClass:[NSArray class]]) return NO;
+    NSArray *maybeBlock = (NSArray*)first;
+    if (maybeBlock.count < 4) return NO;
+    // first 4 entries numeric: x,y,w,h
+    return [maybeBlock[0] isKindOfClass:[NSNumber class]] &&
+           [maybeBlock[1] isKindOfClass:[NSNumber class]] &&
+           [maybeBlock[2] isKindOfClass:[NSNumber class]] &&
+           [maybeBlock[3] isKindOfClass:[NSNumber class]];
+}
+
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
         if (argc < 2) {
-            fprintf(stderr, "Usage: %s <path/to/get_blocks.py>\n", argv[0]);
+            fprintf(stderr, "Usage: %s <path/to/get_blocks.py> [script args...]\n", argv[0]);
             return 1;
         }
         NSString *scriptPath = AbsolutePath([NSString stringWithUTF8String:argv[1]]);
@@ -84,112 +128,127 @@ int main(int argc, const char * argv[]) {
             return 1;
         }
 
+        // Forward any extra args (e.g. --mode all --target 1024x768)
+        NSMutableArray<NSString*> *scriptArgs = [NSMutableArray array];
+        for (int i = 2; i < argc; ++i) {
+            [scriptArgs addObject:[NSString stringWithUTF8String:argv[i]]];
+        }
+
+        // 1) Run Python once and cache frames
+        NSError *runErr = nil;
+        NSString *output = RunPythonOnce(scriptPath, scriptArgs, &runErr);
+        if (!output) {
+            fprintf(stderr, "Failed to run Python: %s\n",
+                    runErr.localizedDescription.UTF8String);
+            return 1;
+        }
+
+        NSString *jsonStr = ExtractJSONNSString(output);
+        if (!jsonStr) {
+            fprintf(stderr, "No JSON found in Python output.\n");
+            return 1;
+        }
+
+        NSError *jsonErr = nil;
+        NSData *jsonData = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+        id parsed = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&jsonErr];
+        if (jsonErr || ![parsed isKindOfClass:[NSArray class]]) {
+            fprintf(stderr, "JSON parse error: %s\n", jsonErr.localizedDescription.UTF8String);
+            return 1;
+        }
+
+        NSArray *top = (NSArray*)parsed;
+        NSArray<NSArray*> *frames = nil;
+        if (LooksLikeBlocksArray(top)) {
+            // SINGLE frame → wrap as one frame
+            frames = @[ top ];
+        } else {
+            // MULTI frame → ensure each element is a blocks array (or empty)
+            NSMutableArray<NSArray*> *norm = [NSMutableArray arrayWithCapacity:top.count];
+            for (id item in top) {
+                if ([item isKindOfClass:[NSArray class]] && LooksLikeBlocksArray((NSArray*)item)) {
+                    [norm addObject:(NSArray*)item];
+                } else if ([item isKindOfClass:[NSArray class]] && [(NSArray*)item count] == 0) {
+                    [norm addObject:(NSArray*)item];
+                } else {
+                    // Skip malformed frames instead of failing hard
+                    continue;
+                }
+            }
+            frames = norm;
+        }
+        if (frames.count == 0) {
+            fprintf(stderr, "No frames to display.\n");
+            return 1;
+        }
+
+        // 2) App + animation over cached frames
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
-        // Quit on Q / Esc
-        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent* (NSEvent *e) {
+        [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                              handler:^NSEvent* (NSEvent *e) {
             NSString *s = e.charactersIgnoringModifiers.lowercaseString;
             if ([s isEqualToString:@"q"] || e.keyCode == 53) { [NSApp terminate:nil]; return nil; }
             return e;
         }];
 
-        // Keep and reuse windows between frames (less flicker)
         NSMutableArray<BlockWindow*> *windows = [NSMutableArray array];
+        __block NSUInteger frameIndex = 0;
 
-        // Timer-driven updates (~5 FPS)
-        __block BOOL busy = NO;
-        NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(__unused NSTimer *t){
-            if (busy) return;
-            busy = YES;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                NSError *runErr = nil;
-                NSString *output = RunPythonScript(scriptPath, &runErr);
-                if (!output) {
-                    NSLog(@"Run error: %@", runErr.localizedDescription);
-                    busy = NO;
-                    return;
-                }
+        // ~10 FPS (0.1s) over cached frames
+        [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(__unused NSTimer *t) {
+            NSArray *blocks = frames[frameIndex % frames.count];
+            frameIndex++;
 
-                // Find first JSON-looking line
-                NSString *jsonLine = nil;
-                for (NSString *line in [output componentsSeparatedByString:@"\n"]) {
-                    NSString *trim = [line stringByTrimmingCharactersInSet:
-                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                    if (trim.length && ([trim hasPrefix:@"["] || [trim hasPrefix:@"{"])) {
-                        jsonLine = trim; break;
-                    }
-                }
-                if (!jsonLine) {
-                    NSLog(@"No JSON found in Python output:\n%@", output);
-                    busy = NO;
-                    return;
-                }
+            // Reuse existing windows
+            NSUInteger reuse = MIN(windows.count, blocks.count);
+            for (NSUInteger i=0; i<reuse; ++i) {
+                NSArray *b = blocks[i];
+                if ([b count] < 4) continue;
+                CGFloat x = [b[0] doubleValue];
+                CGFloat y = [b[1] doubleValue];
+                CGFloat w = [b[2] doubleValue];
+                CGFloat h = [b[3] doubleValue];
+                NSColor *col = ([b count] >= 5) ? ColorFromJSONValue(b[4]) : [NSColor blackColor];
 
-                NSError *jsonErr = nil;
-                NSData *jsonData = [jsonLine dataUsingEncoding:NSUTF8StringEncoding];
-                id parsed = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:&jsonErr];
-                if (jsonErr || ![parsed isKindOfClass:[NSArray class]]) {
-                    NSLog(@"JSON parse error: %@\nLine: %@", jsonErr.localizedDescription, jsonLine);
-                    busy = NO;
-                    return;
-                }
-                NSArray *blocks = (NSArray*)parsed;
+                BlockWindow *win = windows[i];
+                [win setFrame:NSMakeRect(x, y, w, h) display:NO animate:NO];
+                [win setBackgroundColor:col];
+                if (![win isVisible]) [win makeKeyAndOrderFront:nil];
+            }
+            // Create missing windows
+            for (NSUInteger i=reuse; i<blocks.count; ++i) {
+                NSArray *b = blocks[i];
+                if ([b count] < 4) continue;
+                CGFloat x = [b[0] doubleValue];
+                CGFloat y = [b[1] doubleValue];
+                CGFloat w = [b[2] doubleValue];
+                CGFloat h = [b[3] doubleValue];
+                NSColor *col = ([b count] >= 5) ? ColorFromJSONValue(b[4]) : [NSColor blackColor];
 
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    // Reuse existing windows where possible
-                    NSUInteger reuse = MIN(windows.count, blocks.count);
-                    for (NSUInteger i=0; i<reuse; ++i) {
-                        NSArray *b = blocks[i];
-                        if (b.count != 5) continue;
-                        CGFloat x = [b[0] doubleValue];
-                        CGFloat y = [b[1] doubleValue];
-                        CGFloat w = [b[2] doubleValue];
-                        CGFloat h = [b[3] doubleValue];
-                        NSColor *col = ColorFromJSONValue(b[4]);
-
-                        BlockWindow *win = windows[i];
-                        [win setFrame:NSMakeRect(x, y, w, h) display:NO animate:NO];
-                        [win setBackgroundColor:col];
-                        if (![win isVisible]) [win makeKeyAndOrderFront:nil];
-                    }
-                    // Add more if needed
-                    for (NSUInteger i=reuse; i<blocks.count; ++i) {
-                        NSArray *b = blocks[i];
-                        if (b.count != 5) continue;
-                        CGFloat x = [b[0] doubleValue];
-                        CGFloat y = [b[1] doubleValue];
-                        CGFloat w = [b[2] doubleValue];
-                        CGFloat h = [b[3] doubleValue];
-                        NSColor *col = ColorFromJSONValue(b[4]);
-
-                        BlockWindow *win = [[BlockWindow alloc]
-                            initWithContentRect:NSMakeRect(x, y, w, h)
-                                      styleMask:NSWindowStyleMaskBorderless
-                                        backing:NSBackingStoreBuffered
-                                          defer:NO];
-                        [win setBackgroundColor:col];
-                        [win setOpaque:YES];
-                        [win setLevel:NSStatusWindowLevel];   // float on top (optional)
-                        [win setIgnoresMouseEvents:YES];      // let mouse pass through (optional)
-                        [win orderFrontRegardless];
-                        [windows addObject:win];
-                    }
-                    // Close extras if fewer blocks this frame
-                    while (windows.count > blocks.count) {
-                        BlockWindow *w = windows.lastObject;
-                        [windows removeLastObject];
-                        [w close];
-                    }
-                    busy = NO;
-                });
-            });
+                BlockWindow *win = [[BlockWindow alloc]
+                    initWithContentRect:NSMakeRect(x, y, w, h)
+                              styleMask:NSWindowStyleMaskBorderless
+                                backing:NSBackingStoreBuffered
+                                  defer:NO];
+                [win setBackgroundColor:col];
+                [win setOpaque:YES];
+                [win setLevel:NSStatusWindowLevel];
+                [win setIgnoresMouseEvents:YES];
+                [win orderFrontRegardless];
+                [windows addObject:win];
+            }
+            // Close extras
+            while (windows.count > blocks.count) {
+                BlockWindow *w = windows.lastObject;
+                [windows removeLastObject];
+                [w close];
+            }
         }];
-        (void)timer;
 
         [NSApp activateIgnoringOtherApps:YES];
         [NSApp run];
     }
     return 0;
 }
-
