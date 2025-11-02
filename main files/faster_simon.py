@@ -18,9 +18,11 @@ import skimage.color as color
 import pygame
 import random
 
+import os
+
 DOWNSCALE = 0.125
 # number of shapes
-ROUNDS = 100
+ROUNDS = 10
 CANDIDATES_BASE = 6
 VAR_WINDOW = 15
 MIN_SIZE = 6
@@ -59,22 +61,28 @@ def clamp_rect(x, y, w, h, H, W):
     h = max(0, min(h, W - y))
     return x, y, w, h
 
-def get_blocks_from_imgs(im_down_color, im_down_gray):
+def get_blocks_from_imgs(target, source = None):
     blocks = []
 
-    H, W, _ = im_down_color.shape
+    H, W, _ = target.shape
 
-    target = im_down_color.astype(np.float32)
-    current_im = np.full_like(target, target.mean(axis=(0,1), keepdims=True), dtype=np.float32)
+    if source is None:
+        source = np.full_like(target, target.mean(axis=(0,1), keepdims=True), dtype=np.float32)
+        avg_color = target.mean(axis=(0, 1))
+        blocks.append((0, 0, W, H, avg_color.copy()))
 
-    avg_color = target.mean(axis=(0, 1))
-    blocks.append((0, 0, W, H, avg_color.copy()))
+    diff = np.abs(target - source)
+    diffsq = diff ** 2
+    error_map = np.mean(diff ** 2, axis=2)
 
-    error_map = np.mean((target - current_im) ** 2, axis=2)
+
     total_error = error_map.sum()
     num_pixels = error_map.size
 
-    var_map = local_variance(im_down_gray, ksize=VAR_WINDOW)
+    luminance = color.rgb2gray(diff)
+    var_map = local_variance(luminance, ksize=VAR_WINDOW)
+
+    solca = np.mean(diffsq) ** 2
 
     var_alpha = 50.0
     combined = error_map / (1.0 + var_map * var_alpha)
@@ -100,9 +108,9 @@ def get_blocks_from_imgs(im_down_color, im_down_gray):
         for idx in idxs:
             y_pix, x_pix = divmod(int(idx), W)
             max_size = min(H, W)
-            base_m = get_sigmoid_size(cur_round, ROUNDS, max_size, MIN_SIZE, steepness=STEEPNESS)
+            base_m = get_sigmoid_size(cur_round, ROUNDS, max_size, MIN_SIZE, steepness=5*(1-solca))
             local_var = var_map[y_pix, x_pix]
-            scale = 1.0 / (1.0 + local_var * 30.0)
+            scale = 1.0 / (1.0 + local_var * 20.0)
             scale = np.clip(scale, 0.25, 1.0)
             m = max(MIN_SIZE, int(base_m * scale))
             rand_w = random.randint(MIN_SIZE, max(MIN_SIZE, m))
@@ -118,7 +126,7 @@ def get_blocks_from_imgs(im_down_color, im_down_gray):
             if w == 0 or h == 0:
                 continue
             roi_target = target[x0:x0+w, y0:y0+h]
-            roi_current = current_im[x0:x0+w, y0:y0+h]
+            roi_current = source[x0:x0+w, y0:y0+h]
 
             avg_color = roi_target.reshape(-1, 3).mean(axis=0)
 
@@ -134,7 +142,7 @@ def get_blocks_from_imgs(im_down_color, im_down_gray):
         if best_block is not None:
             x0, y0, w, h, avg_color, old_err_sum, new_err_sum = best_block
             blocks.append((x0, y0, w, h, avg_color))
-            current_im[x0:x0+w, y0:y0+h] = avg_color
+            source[x0:x0+w, y0:y0+h] = avg_color
             new_err_map_roi = np.mean((target[x0:x0+w, y0:y0+h] - avg_color) ** 2, axis=2)
             prev_err_map_roi = error_map[x0:x0+w, y0:y0+h]
             total_error = total_error - prev_err_map_roi.sum() + new_err_map_roi.sum()
@@ -151,58 +159,69 @@ def get_blocks_from_imgs(im_down_color, im_down_gray):
             else:
                 prob_map = combined.ravel() / sum_combined
             cdf = np.cumsum(prob_map)
-    return blocks
+    return blocks, source
 
 
 if __name__ == "__main__":
-    try:
-        p = path.dirname(path.abspath(__file__))
-        img_path = path.join(p, path.join('images','obama.jpg'))
-    except NameError:
-        p = '.' 
-        img_path = path.join(p, 'images', 'obama.jpg')
-        print(f"Warning: __file__ not defined. Assuming image is at {img_path}")
+    images_folder = "images"
 
+    allowed_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tif'}
 
-    im = io.imread(img_path)
-    im = skimage.img_as_float(im)
+    all_files = os.listdir(images_folder)
+    image_files = [
+        f for f in all_files 
+        if path.splitext(f)[1].lower() in allowed_extensions
+    ]
+
+    num_files = len(image_files)
+    image_files.sort()
+
+    filename = image_files[0]
+    im = io.imread(os.path.join(images_folder, filename))
+    im = skimage.img_as_float(im)[..., :3]
     im.astype(np.float32)
 
-    w,h,_ = im.shape
-    w = int(w / 2)
-    h = int(h / 2)
+    h,w,_ = im.shape
 
-    print(w, h)
+    target = reduce(im, DOWNSCALE)
 
-    im_down_color = reduce(im, DOWNSCALE)
-
-    im_down_gray = color.rgb2gray(im_down_color)
-
-    im_h, im_w, _ = im_down_color.shape
+    im_h, im_w, _ = target.shape
 
     wpad, hpad = 10, 10
 
-    ws = w / im_w
-    hs = h / im_w
+    output_w = w / 2
+    output_h = h / 2
 
-    blocks = get_blocks_from_imgs(im_down_color, im_down_gray)
+    ws = int(output_w / im_w)
+    hs = int(output_h / im_h)
+
+    blocks, curr_frame = get_blocks_from_imgs(target, None)
 
     pygame.init()
 
-    screen = pygame.display.set_mode((h + 2 * hpad, w + 2 * wpad))
+    screen = pygame.display.set_mode((output_w + 2 * wpad, output_h + 2 * hpad))
     pygame.display.set_caption("Drawing Rectangles from an Array")
     clock = pygame.time.Clock()
 
+    screen.fill((255,0,0))
+    pygame.draw.rect(screen, (0,0,0), (wpad, hpad, output_w, output_h))
+
     running = True
+    i = 0
     while running:
         for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                         running = False
 
-        screen.fill((255,0,0))
-        pygame.draw.rect(screen, (0,0,0), (wpad, hpad, w, h))
+        file_index = i % num_files
+        filename = image_files[file_index]
+        im = io.imread(os.path.join(images_folder, filename))
+        im = skimage.img_as_float(im)[..., :3]
+        im.astype(np.float32)
 
-        blocks = get_blocks_from_imgs(im_down_color, im_down_gray)
+        target = reduce(im, DOWNSCALE)
+
+        blocks, curr_frame = get_blocks_from_imgs(target, curr_frame)
 
         for (x, y, w, h, c) in blocks:
                 c = c * 255
@@ -211,4 +230,5 @@ if __name__ == "__main__":
                 pygame.draw.rect(screen, tuple(c), (y * hs + hpad, x * ws + wpad, h * hs, w * ws))
         pygame.display.flip()
         clock.tick(60)
+        i += 1
     pygame.quit()
