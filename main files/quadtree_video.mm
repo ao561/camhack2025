@@ -174,10 +174,11 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
 @property (nonatomic) NSInteger currentFrame;
 @property (nonatomic) std::mt19937 rng;
 @property (nonatomic) std::uniform_real_distribution<double> uni;
-@property (nonatomic) CGFloat areaX0, areaY0, scaleX, scaleY;
-@property (nonatomic) std::vector<std::tuple<int, int, int, int>> windowRegions; // (x, y, w, h) for each window
+@property (nonatomic) CGFloat areaX0, areaY0, scaleX, scaleY, imgW, imgH;
+@property (nonatomic) CGFloat screenW, screenH;
 - (instancetype)initWithFramePaths:(NSArray<NSString*> *)paths;
 - (void)updateFrame;
+- (void)rebuildWindowsForFrame:(NSBitmapImageRep *)bitmap;
 @end
 
 @implementation QuadtreeVideoController
@@ -257,6 +258,10 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
     _areaY0 = screenFrame.origin.y + (screenH - areaH) / 2;
     _scaleX = areaW / imgW;
     _scaleY = areaH / imgH;
+    _imgW = imgW;
+    _imgH = imgH;
+    _screenW = screenW;
+    _screenH = screenH;
     
     // Create windows and store their regions
     for (QuadNode *node : leaves) {
@@ -299,13 +304,10 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
         
         [win orderFront:nil];
         [_windows addObject:win];
-        
-        // Store region info for updates
-        _windowRegions.push_back(std::make_tuple(node->x, node->y, node->w, node->h));
     }
     
     NSLog(@"Created %lu windows for %lu frames", (unsigned long)_windows.count, (unsigned long)_framePaths.count);
-    NSLog(@"Playing at %.1f seconds per frame", FRAME_DURATION);
+    NSLog(@"Playing at %.1f seconds per frame (dynamic quadtree per frame)", FRAME_DURATION);
     
     // Start frame timer
     _frameTimer = [NSTimer scheduledTimerWithTimeInterval:FRAME_DURATION
@@ -320,7 +322,7 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
 - (void)updateFrame {
     _currentFrame = (_currentFrame + 1) % _framePaths.count;
     
-    NSLog(@"Displaying frame %ld/%lu", (long)_currentFrame + 1, (unsigned long)_framePaths.count);
+    NSLog(@"Rebuilding quadtree for frame %ld/%lu", (long)_currentFrame + 1, (unsigned long)_framePaths.count);
     
     NSString *framePath = _framePaths[_currentFrame];
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:framePath];
@@ -344,21 +346,71 @@ std::unique_ptr<QuadNode> buildQuadtree(NSBitmapImageRep *bitmap) {
         [image unlockFocus];
     }
     
-    // Update each window's color based on its region in the new frame
-    for (NSUInteger i = 0; i < _windows.count; ++i) {
-        auto region = _windowRegions[i];
-        int x = std::get<0>(region);
-        int y = std::get<1>(region);
-        int w = std::get<2>(region);
-        int h = std::get<3>(region);
-        RGB color = calculateAvgColor(bitmap, x, y, w, h);
+    // Rebuild windows with new quadtree for this frame
+    [self rebuildWindowsForFrame:bitmap];
+}
+
+- (void)rebuildWindowsForFrame:(NSBitmapImageRep *)bitmap {
+    // Close all existing windows
+    for (NSWindow *win in _windows) {
+        [win close];
+    }
+    [_windows removeAllObjects];
+    
+    // Build new quadtree for this frame
+    auto root = buildQuadtree(bitmap);
+    
+    std::vector<QuadNode*> leaves;
+    root->getLeafNodes(leaves);
+    
+    // Sort leaves from bottom-right to top-left
+    std::sort(leaves.begin(), leaves.end(), [](QuadNode* a, QuadNode* b) {
+        if (a->y != b->y) return a->y > b->y;
+        return a->x > b->x;
+    });
+    
+    NSLog(@"Frame has %lu windows", leaves.size());
+    
+    // Create new windows based on this frame's quadtree
+    for (QuadNode *node : leaves) {
+        CGFloat screenX = _areaX0 + node->x * _scaleX;
+        CGFloat screenY = _areaY0 + (_imgH - node->y - node->h) * _scaleY;
+        CGFloat screenWNode = node->w * _scaleX;
+        CGFloat screenHNode = node->h * _scaleY;
         
-        CGFloat r = color.r / 255.0;
-        CGFloat g = color.g / 255.0;
-        CGFloat b = color.b / 255.0;
+        // Add jitter
+        CGFloat jx = (_uni(_rng) * 2.0 - 1.0) * JITTER_POS * screenWNode;
+        CGFloat jy = (_uni(_rng) * 2.0 - 1.0) * JITTER_POS * screenHNode;
         
-        NSWindow *win = _windows[i];
-        win.contentView.layer.backgroundColor = CGColorCreateGenericRGB(r, g, b, 1.0);
+        CGFloat posX = std::max(0.0, std::min(screenX + jx, _screenW - screenWNode));
+        CGFloat posY = std::max(0.0, std::min(screenY + jy, _screenH - screenHNode));
+        CGFloat winW = std::max((CGFloat)MIN_WINDOW_SIZE, screenWNode);
+        CGFloat winH = std::max((CGFloat)MIN_WINDOW_SIZE, screenHNode);
+        
+        NSRect rect = NSMakeRect(posX, posY, winW, winH);
+        
+        NSWindow *win = [[NSWindow alloc]
+            initWithContentRect:rect
+                      styleMask:(NSWindowStyleMaskTitled |
+                                NSWindowStyleMaskClosable |
+                                NSWindowStyleMaskMiniaturizable)
+                        backing:NSBackingStoreBuffered
+                          defer:NO];
+        
+        win.title = @"Program Window";
+        win.opaque = YES;
+        win.hasShadow = YES;
+        win.level = NSNormalWindowLevel;
+        
+        NSView *content = win.contentView;
+        content.wantsLayer = YES;
+        CGFloat r = node->color.r / 255.0;
+        CGFloat g = node->color.g / 255.0;
+        CGFloat b = node->color.b / 255.0;
+        content.layer.backgroundColor = CGColorCreateGenericRGB(r, g, b, 1.0);
+        
+        [win orderFront:nil];
+        [_windows addObject:win];
     }
 }
 
