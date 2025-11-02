@@ -51,7 +51,6 @@ def get_blocks():
         c = tuple(c)
         new_data.append((x,y,w,h,rgb_to_hex(c)))
 
-    print(new_data)
 
     curr_frame = curr_frame.clip(0, 1)
 

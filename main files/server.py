@@ -22,13 +22,20 @@ CORS(app)
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PARENT_DIR = os.path.dirname(BASE_DIR)  # camhack2025 folder
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 FRAMES_FOLDER = os.path.join(BASE_DIR, 'frames')
+IMAGES_FOLDER = os.path.join(BASE_DIR, 'images')
+WINDOW_CREATOR = os.path.join(PARENT_DIR, 'WindowCreator')
+GET_BLOCKS_PY = os.path.join(BASE_DIR, 'get_block2.py')
+FASTER_SIMON_PY = os.path.join(BASE_DIR, 'faster_simon.py')
+PREV_FRAME_PATH = os.path.join(BASE_DIR, 'prev_frame.jpg')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov', 'webm'}
 MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
+os.makedirs(IMAGES_FOLDER, exist_ok=True)
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['FRAMES_FOLDER'] = FRAMES_FOLDER
@@ -38,6 +45,9 @@ app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 current_display_process = None
 current_capture_thread = None
 stop_capture_flag = threading.Event()
+current_mode = None  # 'image', 'video', 'screen', 'webcam'
+current_fps = 10
+current_target_resolution = None
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -48,13 +58,72 @@ def clear_frames_folder():
         if file.is_file():
             file.unlink()
 
+def clear_images_folder():
+    """Clear existing images"""
+    for file in Path(IMAGES_FOLDER).glob('*'):
+        if file.is_file():
+            file.unlink()
+
+def clear_prev_frame():
+    """Clear previous frame cache"""
+    if os.path.exists(PREV_FRAME_PATH):
+        os.remove(PREV_FRAME_PATH)
+
+def copy_frames_to_images():
+    """Copy frames to images folder"""
+    import shutil
+    clear_images_folder()
+    frames = sorted(Path(FRAMES_FOLDER).glob('frame_*.png'))
+    for frame in frames:
+        shutil.copy(str(frame), str(Path(IMAGES_FOLDER) / frame.name))
+    return len(frames)
+
+def get_image_aspect_ratio(image_path):
+    """Get image dimensions"""
+    try:
+        img = Image.open(image_path)
+        return img.size
+    except:
+        return None, None
+
+def calculate_target_resolution(width, height, max_width=1920, max_height=1080):
+    """Calculate target resolution maintaining aspect ratio"""
+    if width is None or height is None:
+        return "1024x768"
+    
+    aspect = width / height
+    
+    if width > max_width or height > max_height:
+        if aspect > (max_width / max_height):
+            target_w = max_width
+            target_h = int(max_width / aspect)
+        else:
+            target_h = max_height
+            target_w = int(max_height * aspect)
+    else:
+        target_w = width
+        target_h = height
+    
+    return f"{target_w}x{target_h}"
+
 def extract_video_frames(video_path, fps=10, max_frames=None):
     """Extract frames from video at specified FPS"""
+    global current_fps, current_target_resolution, current_mode
+    current_mode = 'video'
+    current_fps = fps
+    
     clear_frames_folder()
+    clear_prev_frame()
     
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return False, "Could not open video file"
+    
+    # Get video dimensions
+    video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    current_target_resolution = calculate_target_resolution(video_width, video_height)
+    print(f"Video: {video_width}x{video_height}, target: {current_target_resolution}")
     
     video_fps = cap.get(cv2.CAP_PROP_FPS)
     frame_interval = int(video_fps / fps) if fps < video_fps else 1
@@ -78,17 +147,28 @@ def extract_video_frames(video_path, fps=10, max_frames=None):
         frame_count += 1
     
     cap.release()
+    print(f"Extracted {saved_count} frames at {fps} FPS")
     return True, f"Extracted {saved_count} frames"
 
 def process_image_to_frame(image_path):
     """Copy/convert single image to frames folder"""
+    global current_mode, current_target_resolution
+    current_mode = 'image'
+    
     clear_frames_folder()
+    clear_prev_frame()
     
     print(f"Processing image: {image_path}")
-    print(f"Frames folder: {FRAMES_FOLDER}")
+    
+    # Get original dimensions
+    width, height = get_image_aspect_ratio(image_path)
+    if width and height:
+        current_target_resolution = calculate_target_resolution(width, height)
+        print(f"Image: {width}x{height}, target: {current_target_resolution}")
+    else:
+        current_target_resolution = "1024x768"
     
     img = Image.open(image_path)
-    # Convert to RGB if necessary
     if img.mode != 'RGB':
         img = img.convert('RGB')
     
@@ -96,31 +176,78 @@ def process_image_to_frame(image_path):
     img.save(frame_path)
     
     print(f"Saved frame to: {frame_path}")
-    print(f"File exists: {os.path.exists(frame_path)}")
     
     return True, "Image ready for display"
 
 def start_quadtree_display():
-    """Start the quadtree video display"""
-    global current_display_process
+    """Start WindowCreator display with get_block2.py"""
+    global current_display_process, current_mode, current_target_resolution
     
-    # Stop any existing display
     stop_quadtree_display()
     
-    # Check if frames exist
+    # Check files
+    if not os.path.exists(WINDOW_CREATOR):
+        return False, f"WindowCreator not found at {WINDOW_CREATOR}"
+    if not os.path.exists(GET_BLOCKS_PY):
+        return False, f"get_block2.py not found"
+    if not os.path.exists(FASTER_SIMON_PY):
+        return False, f"faster_simon.py not found"
+    
     frames = sorted(Path(FRAMES_FOLDER).glob('frame_*.png'))
     if not frames:
         return False, "No frames available"
     
-    # Start quadtree_video executable
-    # Note: Assumes quadtree_video is compiled and in the same directory
+    # Determine target resolution
+    if current_mode in ['screen', 'webcam']:
+        target_res = "2560x1600"
+    elif current_target_resolution:
+        target_res = current_target_resolution
+    else:
+        target_res = "1024x768"
+    
+    print(f"Starting WindowCreator: mode={current_mode}, target={target_res}")
+    
     try:
-        current_display_process = subprocess.Popen(['./quadtree_video'])
-        return True, f"Started display with {len(frames)} frames"
-    except FileNotFoundError:
-        return False, "quadtree_video executable not found. Please compile first."
+        if current_mode in ['screen', 'webcam']:
+            # Real-time mode
+            cmd = [
+                WINDOW_CREATOR,
+                GET_BLOCKS_PY,
+                '--mode', 'single',
+                '--folder', 'frames',
+                '--target', target_res
+            ]
+        elif current_mode == 'image':
+            # Single image
+            copy_frames_to_images()
+            cmd = [
+                WINDOW_CREATOR,
+                GET_BLOCKS_PY,
+                '--mode', 'single',
+                '--folder', 'images',
+                '--target', target_res
+            ]
+        else:  # video
+            # All frames
+            copy_frames_to_images()
+            cmd = [
+                WINDOW_CREATOR,
+                GET_BLOCKS_PY,
+                '--mode', 'all',
+                '--folder', 'images',
+                '--target', target_res
+            ]
+        
+        print(f"Command: {' '.join(cmd)}")
+        current_display_process = subprocess.Popen(
+            cmd,
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        return True, f"Started display with {len(frames)} frames at {target_res}"
     except Exception as e:
-        return False, f"Error starting display: {str(e)}"
+        return False, f"Error: {str(e)}"
 
 def stop_quadtree_display():
     """Stop the quadtree display"""
@@ -133,17 +260,23 @@ def stop_quadtree_display():
         except subprocess.TimeoutExpired:
             current_display_process.kill()
         current_display_process = None
+        clear_prev_frame()
 
 def capture_screen_thread(fps=10, duration=None):
     """Capture screen in background thread"""
-    global stop_capture_flag
+    global stop_capture_flag, current_mode, current_fps, current_target_resolution
     
+    current_mode = 'screen'
+    current_fps = fps
+    current_target_resolution = "2560x1600"
     clear_frames_folder()
+    clear_prev_frame()
     stop_capture_flag.clear()
     
     frame_count = 0
     start_time = time.time()
     frame_interval = 1.0 / fps
+    max_frames = 100
     
     try:
         import mss
@@ -158,8 +291,9 @@ def capture_screen_thread(fps=10, duration=None):
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes('RGB', screenshot.size, screenshot.rgb)
                 
-                # Save frame
-                frame_path = os.path.join(FRAMES_FOLDER, f'frame_{frame_count:04d}.png')
+                # Save frame with rolling index
+                frame_index = frame_count % max_frames
+                frame_path = os.path.join(FRAMES_FOLDER, f'frame_{frame_index:04d}.png')
                 img.save(frame_path)
                 frame_count += 1
                 
@@ -172,9 +306,13 @@ def capture_screen_thread(fps=10, duration=None):
 
 def capture_webcam_thread(fps=10, duration=None):
     """Capture webcam in background thread"""
-    global stop_capture_flag
+    global stop_capture_flag, current_mode, current_fps, current_target_resolution
     
+    current_mode = 'webcam'
+    current_fps = fps
+    current_target_resolution = "2560x1600"
     clear_frames_folder()
+    clear_prev_frame()
     stop_capture_flag.clear()
     
     cap = cv2.VideoCapture(0)
@@ -185,6 +323,7 @@ def capture_webcam_thread(fps=10, duration=None):
     frame_count = 0
     start_time = time.time()
     frame_interval = 1.0 / fps
+    max_frames = 100
     
     try:
         while not stop_capture_flag.is_set():
@@ -195,8 +334,9 @@ def capture_webcam_thread(fps=10, duration=None):
             if not ret:
                 break
             
-            # Save frame
-            frame_path = os.path.join(FRAMES_FOLDER, f'frame_{frame_count:04d}.png')
+            # Save frame with rolling index
+            frame_index = frame_count % max_frames
+            frame_path = os.path.join(FRAMES_FOLDER, f'frame_{frame_index:04d}.png')
             cv2.imwrite(frame_path, frame)
             frame_count += 1
             
@@ -349,13 +489,22 @@ def status():
     return jsonify({
         'frames': frame_count,
         'display_active': current_display_process is not None and current_display_process.poll() is None,
-        'capture_active': current_capture_thread is not None and current_capture_thread.is_alive()
+        'capture_active': current_capture_thread is not None and current_capture_thread.is_alive(),
+        'mode': current_mode,
+        'fps': current_fps,
+        'target_resolution': current_target_resolution
     })
 
 @app.route('/api/frames/clear', methods=['POST'])
 def clear_frames():
+    global current_mode, current_fps, current_target_resolution
     clear_frames_folder()
+    clear_images_folder()
+    clear_prev_frame()
     stop_quadtree_display()
+    current_mode = None
+    current_fps = 10
+    current_target_resolution = None
     return jsonify({'message': 'Frames cleared'})
 
 if __name__ == '__main__':
