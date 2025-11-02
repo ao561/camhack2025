@@ -5,7 +5,6 @@ import skimage.io as io
 import skimage
 import skimage.color as color
 from scipy.ndimage import uniform_filter
-import pygame
 
 import cv2
 import numpy as np
@@ -14,15 +13,13 @@ import skimage.io as io
 import skimage
 
 import skimage.color as color
-
-import pygame
 import random
 
 import os
 
 DOWNSCALE = 0.125
 # number of shapes
-ROUNDS = 10
+ROUNDS = 100
 CANDIDATES_BASE = 6
 VAR_WINDOW = 15
 MIN_SIZE = 6
@@ -163,6 +160,7 @@ def get_blocks_from_imgs(target, source = None):
 
 
 if __name__ == "__main__":
+    import pygame
     images_folder = "images"
 
     allowed_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tif'}
