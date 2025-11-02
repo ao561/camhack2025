@@ -103,7 +103,7 @@ def main():
     target_w, target_h = args.target
 
     base = os.path.dirname(os.path.abspath(__file__))
-    images_dir = os.path.join(base, "images")
+    images_dir = os.path.join(base, "frames")
     if not os.path.isdir(images_dir):
         print(f"Error: images folder not found at {images_dir}", file=sys.stderr)
         sys.exit(1)
