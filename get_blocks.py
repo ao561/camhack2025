@@ -33,6 +33,8 @@ def get_blocks():
 
         im = io.imread(img_path)
         im = skimage.img_as_float(im)
+        # Rotate image 90 degrees clockwise
+        im = skimage.transform.rotate(im, -90, resize=True)  # negative angle for clockwise
         im.astype(np.float32)
 
         w,h,_ = im.shape
