@@ -1,4 +1,4 @@
-from faster import get_blocks_from_imgs, reduce
+from faster_simon import get_blocks_from_imgs, reduce
 
 import numpy as np
 import skimage.io as io
