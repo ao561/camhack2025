@@ -2,14 +2,14 @@
 
 Shatter is a unique visual art project that deconstructs images, videos, and real-time streams into an animated mosaic of native macOS windows. Inspired by creative media like Animator vs Animation, Shatter is an unconventional rendering software that uses individual, overlapping windows on a user's desktop to form an image.
 
-The result is a dynamic, "shattered" effect created by colored rectangular blocks, each rendered as a separate, movable macOS window.
+The result is a dynamic, "shattered" effect created by coloured rectangular blocks, each rendered as a separate, movable macOS window.
 
 ## 🌟 Key Features
 
--   **Native Window Rendering**: Utilizes a compiled macOS binary (`WindowCreator` based on the Cocoa framework) to render blocks as actual, movable windows, providing the project's signature effect.
+-   **Native Window Rendering**: Utilises a compiled macOS binary (`WindowCreator` based on the Cocoa framework) to render blocks as actual, movable windows, providing the project's signature effect.
 -   **Multiple Input Sources**: Supports static images, videos, real-time screen captures, and live webcam feeds.
--   **Optimized Decomposition**: Features a variance-based quadtree algorithm combined with a probabilistic sampler for efficient image deconstruction.
--   **Performance Optimization**: Employs Frame Differencing to only update regions that change between frames, dramatically improving video and real-time stream performance.
+-   **Optimised Decomposition**: Features a frame differencing algorithm combined with a probabilistic sampler that dynamically focuses on regions of high deviation for efficient image deconstruction, resulting in seamless transitions.
+-   **Performance Optimisation**: Employs Frame Differencing to only update regions that change between frames, dramatically improving video and real-time stream performance.
 -   **Web-Based Control Panel**: An intuitive HTML/Flask frontend for managing input sources, configuring settings, and starting/stopping the display.
 -   **Aspect Ratio Preservation**: Automatically calculates and maintains the correct aspect ratio for uploaded images and videos.
 
@@ -27,7 +27,7 @@ Shatter operates using a three-part architecture:
 3.  **Core Processing & Rendering**:
     * The compiled `WindowCreator` (Objective-C/C++) application is executed by the server.
     * `WindowCreator` calls the Python processing scripts (`get_block2.py` / `faster_simon.py`). These scripts perform the frame differencing and the probabilistic, variance-based decomposition to generate the JSON block data.
-    * `WindowCreator` reads the JSON and creates, moves, or updates the native macOS windows on the desktop, realizing the "shattered" animation.
+    * `WindowCreator` reads the JSON and creates, moves, or updates the native macOS windows on the desktop, realising the "shattered" animation.
 
 ## 💡 The Journey and Technical Breakthroughs
 
@@ -35,10 +35,10 @@ The project began by experimenting with Python's Tkinter on Windows, but the ini
 
 We shifted development to **macOS** and experimented with **Objective-C** for window handling. This move immediately produced a significant performance increase, achieving 10-15 FPS with the original quadtree code.
 
-The final performance breakthrough came from implementing a new, optimized approach:
+The final performance breakthrough came from implementing a new, optimised approach:
 
 -   **Probabilistic Sampler**: Instead of searching the entire image on every frame, the algorithm was modified to focus on regions of high deviation (where the image changed most).
--   **Frame Differencing Optimization**: By iterating upon previous frames and only updating the blocks that had changed, the system achieved an amazing performance boost and seamless transitions between frames.
+-   **Frame Differencing Optimisation**: By iterating upon previous frames and only updating the blocks that had changed, the system achieved an amazing performance boost and seamless transitions between frames.
 
 ## Setup and Installation
 
